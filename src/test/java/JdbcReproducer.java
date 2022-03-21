@@ -6,9 +6,11 @@ import io.vertx.ext.sql.SQLConnection;
 import io.vertx.jdbcclient.JDBCPool;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
+import io.vertx.sqlclient.PropertyKind;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.SqlConnection;
 import io.vertx.sqlclient.Tuple;
+import oracle.sql.ROWID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,7 @@ public class JdbcReproducer {
     private static final JDBCPool jdbcPool = JDBCPool.pool(Vertx.vertx(), connDetailsFromEnv());
 
     private static JsonObject connDetailsFromEnv() {
+        System.out.println(System.getenv("DB_JDBC_URL"));
         return new JsonObject()
             .put("provider_class", io.vertx.ext.jdbc.spi.impl.AgroalCPDataSourceProvider.class.getCanonicalName())
             .put("jdbcUrl", System.getenv("DB_JDBC_URL"))
@@ -84,14 +87,14 @@ public class JdbcReproducer {
                         testContext.failNow(updateResultAsyncResult.cause());
                     }
                     assertThat(updateResultAsyncResult.result()).isNotNull();
-                    JsonArray rowId = updateResultAsyncResult.result().getKeys();
-                    connection.queryWithParams(SELECT, new JsonArray().add(rowId), resultSetAsyncResult -> {
+                    ROWID rowid = new ROWID(updateResultAsyncResult.result().getKeys().getString(0).getBytes());
+                    connection.queryWithParams(SELECT, new JsonArray().add(rowid), resultSetAsyncResult -> {
                         if (resultSetAsyncResult.succeeded()) {
                             assertThat(resultSetAsyncResult.result().getRows().size()).isEqualTo(1);
                             JsonObject result = resultSetAsyncResult.result().getRows().get(0);
-                            assertThat(result.getString("name")).isEqualTo("pickle");
-                            assertThat(result.getInteger("ammount")).isEqualTo(5);
-                            assertThat(result.getString("id")).isNotNull();
+                            assertThat(result.getString("NAME")).isEqualTo("pickle");
+                            assertThat(result.getInteger("AMOUNT")).isEqualTo(5);
+                            assertThat(result.getString("ID")).isNotNull();
                             testContext.completeNow();
                         } else {
                             testContext.failNow(resultSetAsyncResult.cause());
@@ -111,20 +114,20 @@ public class JdbcReproducer {
                 SqlConnection connection = sqlConnectionAsyncResult.result();
                 connection.preparedQuery(INSERT).execute(Tuple.of("pickle", 5))
                     .onSuccess(rows -> {
-                    Row lastInsertId = rows.property(JDBCPool.GENERATED_KEYS);
-                    try {
-                        byte[] newId = lastInsertId.get(byte[].class, 0);
-                        connection.preparedQuery(SELECT).execute(Tuple.of(newId))
-                            .onSuccess(rows1 -> {
-                                for (Row row : rows1) {
-
-                                }
-                                testContext.completeNow();
-                            }).onFailure(throwable -> testContext.failNow(throwable));
-                    } catch (Exception exception) {
-                        testContext.failNow(exception);
-                    }
-                }).onFailure(throwable -> testContext.failNow(throwable));
+                        Row lastInsertId = rows.property(JDBCPool.GENERATED_KEYS);
+                        ROWID rowid = new ROWID((byte[]) lastInsertId.getValue(0));
+                        try {
+                            connection.preparedQuery(SELECT).execute(Tuple.of(rowid))
+                                .onSuccess(rows1 -> {
+                                    for (Row row : rows1) {
+                                        System.out.println(row.toJson());
+                                    }
+                                    testContext.completeNow();
+                                }).onFailure(throwable -> testContext.failNow(throwable));
+                        } catch (Exception exception) {
+                            testContext.failNow(exception);
+                        }
+                    }).onFailure(throwable -> testContext.failNow(throwable));
             }
         });
     }
